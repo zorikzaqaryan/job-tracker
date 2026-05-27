@@ -5,6 +5,14 @@ import com.zak.jobhunter.channel.SourceType;
 import com.zak.jobhunter.channel.dto.ChannelResponse;
 import com.zak.jobhunter.messaging.RabbitQueues;
 import com.zak.jobhunter.messaging.RawJobMessage;
+import com.zak.jobhunter.telegram.tdlib.TdLibChannelRegistry;
+import it.tdlight.client.APIToken;
+import it.tdlight.client.AuthenticationSupplier;
+import it.tdlight.client.SimpleTelegramClient;
+import it.tdlight.client.SimpleTelegramClientBuilder;
+import it.tdlight.client.SimpleTelegramClientFactory;
+import it.tdlight.client.TDLibSettings;
+import it.tdlight.jni.TdApi;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -15,53 +23,22 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
-import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * TDLib-based Telegram user account collector.
+ * TDLight-based Telegram user account collector.
  *
- * <p>This class is the integration skeleton for TDLib (Telegram Database Library).
- * TDLib provides a C++ native library with Java JNI bindings that allows
- * authenticating as a regular Telegram user account — required to read messages
- * from channels where only your personal account is subscribed (bots cannot do this).
+ * <p>Reads messages from channels you are subscribed to with your personal account
+ * and publishes them to {@code raw-job-messages} for the normal pipeline.
  *
- * <h2>TDLib setup — TODO checklist</h2>
- * <ol>
- *   <li>Download the TDLib native library for your OS from
- *       <a href="https://github.com/tdlib/td">https://github.com/tdlib/td</a>
- *       or build it from source with Java JNI support enabled.</li>
- *   <li>Add the Maven/Gradle dependency for the Java TDLib wrapper, e.g.:
- *       <pre>
- *         &lt;dependency&gt;
- *           &lt;groupId&gt;io.github.tdlibx&lt;/groupId&gt;
- *           &lt;artifactId&gt;td&lt;/artifactId&gt;
- *           &lt;version&gt;1.8.x&lt;/version&gt;
- *         &lt;/dependency&gt;
- *       </pre>
- *       or use the unofficial wrapper: <a href="https://github.com/p-vogt/tdlight-java">tdlight-java</a>.</li>
- *   <li>Place the native shared library (libtdjni.so / tdjni.dll / libtdjni.dylib) in
- *       {@code -Djava.library.path} or next to the JAR.</li>
- *   <li>Replace all TODO sections below with actual TDLib API calls.</li>
- *   <li>Handle the TDLib authorization state machine:
- *       <ul>
- *         <li>authorizationStateWaitTdlibParameters → send SetTdlibParameters</li>
- *         <li>authorizationStateWaitPhoneNumber → send SetAuthenticationPhoneNumber</li>
- *         <li>authorizationStateWaitCode → read OTP from console/stdin or a REST endpoint</li>
- *         <li>authorizationStateWaitPassword → send CheckAuthenticationPassword</li>
- *         <li>authorizationStateReady → start listening for updates</li>
- *       </ul>
- *   </li>
- *   <li>Listen for {@code updateNewMessage} events and filter by chat IDs that
- *       match the enabled sources loaded from {@link ChannelService}.</li>
- *   <li>For each matching message, build a {@link RawJobMessage} and publish
- *       it to RabbitMQ using the injected {@link RabbitTemplate}.</li>
- * </ol>
- *
- * <p>This bean is only created when {@code app.telegram.user.enabled=true}.
- * During development without TDLib installed, the no-op stub
- * {@link NoOpTelegramCollector} is active instead.
+ * <p>Setup guide: {@code TDLIB_SETUP.md}
  */
 @Component
 @ConditionalOnProperty(name = "app.telegram.user.enabled", havingValue = "true")
@@ -70,30 +47,48 @@ public class TdLibTelegramClient implements TelegramUserCollector {
 
     private static final Logger log = LoggerFactory.getLogger(TdLibTelegramClient.class);
 
-    private final TelegramProperties properties;
-    private final ChannelService     channelService;
-    private final RabbitTemplate     rabbitTemplate;
+    private final TelegramProperties       properties;
+    private final ChannelService           channelService;
+    private final RabbitTemplate           rabbitTemplate;
+    private final SimpleTelegramClientFactory clientFactory;
+    private final TdLibChannelRegistry     channelRegistry;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private volatile SimpleTelegramClient client;
 
-    // TODO: inject the TDLib client once the dependency is added
-    // private Client tdClient;
+    /** TDLib API calls must not block on the TDLib update thread — use this executor. */
+    private final ExecutorService tdlibApiExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "tdlib-api-worker");
+        t.setDaemon(true);
+        return t;
+    });
 
     @Override
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
-        if (running.compareAndSet(false, true)) {
-            log.info("Starting TDLib Telegram user collector …");
-            initializeTdLib();
+        if (!running.compareAndSet(false, true)) {
+            return;
         }
+        Thread connector = new Thread(this::connect, "tdlib-connector");
+        connector.setDaemon(true);
+        connector.start();
     }
 
     @Override
     @PreDestroy
     public void stop() {
-        if (running.compareAndSet(true, false)) {
-            log.info("Stopping TDLib Telegram user collector …");
-            shutdownTdLib();
+        if (!running.compareAndSet(true, false)) {
+            return;
+        }
+        shutdownTdLib();
+        tdlibApiExecutor.shutdown();
+        try {
+            if (!tdlibApiExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                tdlibApiExecutor.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            tdlibApiExecutor.shutdownNow();
         }
     }
 
@@ -102,76 +97,185 @@ public class TdLibTelegramClient implements TelegramUserCollector {
         return running.get();
     }
 
-    // ─── TDLib lifecycle ─────────────────────────────────────────────────
+    private void connect() {
+        try {
+            validateConfig();
 
-    private void initializeTdLib() {
-        // TODO Step 1: Load the native TDLib library
-        // System.loadLibrary("tdjni");
+            APIToken apiToken = new APIToken(
+                    properties.user().apiId(),
+                    properties.user().apiHash());
 
-        // TODO Step 2: Create a TDLib Client instance and set up the update handler
-        // tdClient = Client.create(this::handleUpdate, null, null);
+            TDLibSettings settings = TDLibSettings.create(apiToken);
+            SessionPaths session = resolveSessionPaths();
+            settings.setDatabaseDirectoryPath(session.database());
+            settings.setDownloadedFilesDirectoryPath(session.files());
 
-        // TODO Step 3: Send SetTdlibParameters request
-        // tdClient.send(new TdApi.SetTdlibParameters(...), result -> { ... });
+            log.info("[TDLib] Session directory: {} (reuse after first login — no OTP/2FA on restart)",
+                    session.database());
 
-        log.warn("TDLib native library not yet configured. " +
-                 "Set app.telegram.user.enabled=false to suppress this warning. " +
-                 "See TdLibTelegramClient Javadoc for setup instructions.");
+            SimpleTelegramClientBuilder builder = clientFactory.builder(settings);
+            builder.addUpdateHandler(TdApi.UpdateAuthorizationState.class, this::onAuthorizationState);
+            builder.addUpdateHandler(TdApi.UpdateNewMessage.class, this::onNewMessage);
+
+            log.info("[TDLib] Connecting as user (phone configured: {}) …",
+                    properties.user().phoneNumber() != null && !properties.user().phoneNumber().isBlank());
+
+            client = buildClient(builder);
+            log.info("[TDLib] Client started. If first login, check the console for OTP / password prompts.");
+        } catch (Exception ex) {
+            running.set(false);
+            log.error("[TDLib] Failed to start collector: {}", ex.getMessage(), ex);
+        }
+    }
+
+    private SimpleTelegramClient buildClient(SimpleTelegramClientBuilder builder) {
+        String phone = properties.user().phoneNumber();
+        if (phone != null && !phone.isBlank()) {
+            return builder.build(AuthenticationSupplier.user(phone.trim()));
+        }
+        log.warn("[TDLib] TELEGRAM_PHONE_NUMBER not set — using interactive console login");
+        return builder.build(AuthenticationSupplier.consoleLogin());
+    }
+
+    /**
+     * Per-phone session folder so TDLib can reuse auth after the first successful login.
+     */
+    private SessionPaths resolveSessionPaths() {
+        String baseDb = properties.user().databaseDirectory();
+        String baseFiles = properties.user().filesDirectory();
+        String phone = properties.user().phoneNumber();
+        String suffix = "default";
+        if (phone != null && !phone.isBlank()) {
+            suffix = phone.trim().replaceAll("[^0-9+]", "").replace("+", "");
+        }
+        return new SessionPaths(
+                Paths.get(baseDb, "session-" + suffix).toAbsolutePath(),
+                Paths.get(baseFiles, "session-" + suffix).toAbsolutePath());
+    }
+
+    private record SessionPaths(Path database, Path files) {}
+
+    private void validateConfig() {
+        if (properties.user().apiId() <= 0) {
+            throw new IllegalStateException(
+                    "TELEGRAM_API_ID is missing or invalid. Get it from https://my.telegram.org/apps");
+        }
+        if (properties.user().apiHash() == null || properties.user().apiHash().isBlank()) {
+            throw new IllegalStateException(
+                    "TELEGRAM_API_HASH is missing. Get it from https://my.telegram.org/apps");
+        }
+    }
+
+    private void onAuthorizationState(TdApi.UpdateAuthorizationState update) {
+        TdApi.AuthorizationState state = update.authorizationState;
+        if (state instanceof TdApi.AuthorizationStateWaitPhoneNumber) {
+            log.info("[TDLib] Waiting for phone number (should be sent automatically from config)");
+        } else if (state instanceof TdApi.AuthorizationStateWaitCode) {
+            log.info("[TDLib] *** Enter the login code in this console (Telegram app → message from Telegram) ***");
+        } else if (state instanceof TdApi.AuthorizationStateWaitPassword waitPassword) {
+            log.info("[TDLib] *** Enter your Telegram Cloud Password (2FA) in this console ***");
+            log.info("[TDLib] This is the password you set in Telegram → Settings → Privacy → Two-Step Verification.");
+            if (waitPassword.passwordHint != null && !waitPassword.passwordHint.isBlank()) {
+                log.info("[TDLib] Hint from Telegram: '{}' — reminder only, NOT your password",
+                        waitPassword.passwordHint);
+            }
+        } else if (state instanceof TdApi.AuthorizationStateReady) {
+            log.info("[TDLib] Logged in successfully — session saved; future restarts should not ask for code/password");
+            // Must not call blocking TDLib APIs on this thread (deadlock → 60s timeout)
+            scheduleChannelRefresh();
+        } else if (state instanceof TdApi.AuthorizationStateClosed) {
+            log.warn("[TDLib] Session closed");
+            running.set(false);
+        }
+    }
+
+    private void scheduleChannelRefresh() {
+        tdlibApiExecutor.execute(() -> {
+            if (client == null || !running.get()) {
+                return;
+            }
+            try {
+                log.info("[TDLib] Resolving tracked channels on worker thread …");
+                var sources = channelService.findAll(SourceType.TELEGRAM, true);
+                channelRegistry.refresh(client, sources);
+            } catch (Exception ex) {
+                log.error("[TDLib] Channel refresh failed: {}", describeError(ex), ex);
+            }
+        });
+    }
+
+    private static String describeError(Throwable ex) {
+        if (ex.getMessage() != null && !ex.getMessage().isBlank()) {
+            return ex.getMessage();
+        }
+        return ex.getClass().getSimpleName()
+                + (ex.getCause() != null ? " — " + describeError(ex.getCause()) : "");
+    }
+
+    private void onNewMessage(TdApi.UpdateNewMessage update) {
+        if (client == null || !running.get()) {
+            return;
+        }
+
+        TdApi.Message message = update.message;
+        long chatId = message.chatId;
+
+        Optional<ChannelResponse> sourceOpt = channelRegistry.findByChatId(chatId);
+        if (sourceOpt.isEmpty()) {
+            return;
+        }
+
+        String text = extractText(message);
+        if (text == null || text.isBlank()) {
+            return;
+        }
+
+        ChannelResponse source = sourceOpt.get();
+        String snippet = text.length() > 80 ? text.substring(0, 80) + "…" : text;
+
+        log.info("[TDLib] ▶ Message from channel='{}' chatId={} msgId={} text='{}'",
+                source.name(), chatId, message.id, snippet);
+
+        String channelIdForDb = source.telegramChannelId() != null && !source.telegramChannelId().isBlank()
+                ? source.telegramChannelId()
+                : String.valueOf(chatId);
+
+        RawJobMessage queueMessage = RawJobMessage.builder()
+                .sourceType(SourceType.TELEGRAM.name())
+                .sourceName(source.name())
+                .sourceChannelId(channelIdForDb)
+                .sourceId(source.id())
+                .externalMessageId(String.valueOf(message.id))
+                .rawText(text)
+                .publishedAt(Instant.ofEpochSecond(message.date))
+                .build();
+
+        rabbitTemplate.convertAndSend(
+                RabbitQueues.EXCHANGE,
+                RabbitQueues.RAW_ROUTING_KEY,
+                queueMessage);
+
+        log.debug("[TDLib] Published to {} queue  channel='{}' msgId={}",
+                RabbitQueues.RAW_QUEUE, source.name(), message.id);
+    }
+
+    private static String extractText(TdApi.Message message) {
+        if (message.content instanceof TdApi.MessageText messageText) {
+            return messageText.text.text;
+        }
+        return null;
     }
 
     private void shutdownTdLib() {
-        // TODO: close the TDLib client gracefully
-        // if (tdClient != null) { tdClient.send(new TdApi.Close(), null); }
-        log.info("TDLib collector shut down");
-    }
-
-    /**
-     * Handles TDLib update objects.
-     * Replace the parameter type with the actual TDLib {@code TdApi.Object}.
-     */
-    @SuppressWarnings("unused")
-    private void handleUpdate(Object update) {
-        // TODO: cast to TdApi.Update subtypes and dispatch:
-        //
-        // if (update instanceof TdApi.UpdateNewMessage msg) {
-        //     handleNewMessage(msg.message);
-        // } else if (update instanceof TdApi.UpdateAuthorizationState state) {
-        //     handleAuthState(state.authorizationState);
-        // }
-    }
-
-    @SuppressWarnings("unused")
-    private void handleNewMessage(Object message) {
-        // TODO: extract chatId, messageId, text, date from TdApi.Message
-        //
-        // long chatId = message.chatId;
-        // String text = (message.content instanceof TdApi.MessageText mt) ? mt.text.text : null;
-        // if (text == null) return;  // skip non-text messages
-        //
-        // // Check if this chat is a tracked source
-        // List<ChannelResponse> sources = channelService.findAll(SourceType.TELEGRAM, true);
-        // boolean tracked = sources.stream()
-        //     .anyMatch(s -> String.valueOf(chatId).equals(s.telegramChannelId()));
-        // if (!tracked) return;
-        //
-        // // Build and publish RawJobMessage
-        // RawJobMessage msg = RawJobMessage.builder()
-        //     .sourceType("TELEGRAM")
-        //     .sourceChannelId(String.valueOf(chatId))
-        //     .externalMessageId(String.valueOf(message.id))
-        //     .rawText(text)
-        //     .publishedAt(Instant.ofEpochSecond(message.date))
-        //     .build();
-        //
-        // rabbitTemplate.convertAndSend(RabbitQueues.EXCHANGE, RabbitQueues.RAW_ROUTING_KEY, msg);
-        // log.info("New Telegram message published to queue: chatId={} msgId={}", chatId, message.id);
-    }
-
-    /**
-     * Load enabled Telegram channels from the database.
-     * Call this after TDLib is authenticated and ready.
-     */
-    private List<ChannelResponse> loadEnabledSources() {
-        return channelService.findAll(SourceType.TELEGRAM, true);
+        if (client != null) {
+            try {
+                client.sendClose();
+                log.info("[TDLib] Collector shut down");
+            } catch (Exception ex) {
+                log.warn("[TDLib] Error during shutdown: {}", ex.getMessage());
+            } finally {
+                client = null;
+            }
+        }
     }
 }

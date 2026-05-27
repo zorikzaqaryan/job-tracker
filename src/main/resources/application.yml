@@ -98,7 +98,8 @@ springdoc:
 
 app:
   matching:
-    threshold: 10
+    # Lower than before: AI is the second gate — avoid dropping borderline rule matches.
+    threshold: ${APP_MATCHING_THRESHOLD:7}
 
   ai:
     enabled: ${APP_AI_ENABLED:true}
@@ -133,4 +134,4 @@ app:
       phone-number: ${TELEGRAM_PHONE_NUMBER:}
       database-directory: ./tdlib-db
       files-directory: ./tdlib-files
-      enabled: false   # set true when TDLib native library is installed
+      enabled: ${TELEGRAM_USER_ENABLED:true}   # see TDLIB_SETUP.md

@@ -85,7 +85,7 @@ Secrets are injected via environment variables (see `.env.example`).
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `app.matching.threshold` | `10` | Minimum rule score to pass first-stage matching |
+| `app.matching.threshold` | `7` | Minimum rule score for first stage (AI filters further) |
 | `app.ai.enabled` | `true` | Enable second-stage AI analysis |
 | `app.ai.provider` | `mock` | `mock` (local) or `gemini` (requires `GEMINI_API_KEY`) |
 | `app.telegram.bot.token` | — | Telegram Bot API token |
@@ -97,17 +97,20 @@ Secrets are injected via environment variables (see `.env.example`).
 
 ---
 
-## TDLib setup
+## TDLib setup (Telegram user collector)
 
-The `TdLibTelegramClient` class contains a complete TODO checklist and a code skeleton.  
-Until TDLib is configured, `app.telegram.user.enabled=false` activates the no-op stub and raw messages can be ingested via the REST API.
+When `app.telegram.user.enabled=true`, the app uses **TDLight Java** to read channels as your user account.
 
-**Steps:**
-1. Download the TDLib native library for your OS from <https://github.com/tdlib/td> or use tdlight-java.
-2. Add the Java wrapper dependency to `pom.xml`.
-3. Place `libtdjni.so` (or `.dll` / `.dylib`) on `java.library.path`.
-4. Set `app.telegram.user.enabled=true` and fill in API credentials.
-5. Implement the `TODO` sections inside `TdLibTelegramClient`.
+**Full guide:** [TDLIB_SETUP.md](TDLIB_SETUP.md)
+
+**Quick checklist:**
+1. Create API app at [my.telegram.org](https://my.telegram.org/apps) → `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
+2. Set `TELEGRAM_PHONE_NUMBER=+...` in `.env`
+3. `app.telegram.user.enabled=true` in `application.yml`
+4. Register channels via `POST /api/channels` (`telegramUsername` or `telegram_channel_id`)
+5. Run `mvn spring-boot:run` in a **terminal** and enter the OTP when prompted (first login only)
+
+Maven pulls Windows natives automatically (`tdlight-natives:windows_amd64`). No manual TDLib build required on Windows.
 
 ---
 

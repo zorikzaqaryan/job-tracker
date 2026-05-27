@@ -216,9 +216,12 @@ public class JobService {
         if (text == null) return null;
         String lower = text.toLowerCase();
         StringBuilder locations = new StringBuilder();
-        if (lower.contains("remote"))   locations.append("Remote ");
-        if (lower.contains("yerevan")) locations.append("Yerevan ");
-        if (lower.contains("armenia")) locations.append("Armenia ");
+        if (lower.contains("remote"))    locations.append("Remote ");
+        if (lower.contains("worldwide") || lower.contains("world wide")) {
+            locations.append("Worldwide ");
+        }
+        if (lower.contains("yerevan"))   locations.append("Yerevan ");
+        if (lower.contains("armenia"))   locations.append("Armenia ");
         String result = locations.toString().trim();
         return result.isBlank() ? null : result;
     }

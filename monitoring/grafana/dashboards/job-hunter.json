@@ -670,13 +670,13 @@
             "showPoints": "auto",
             "spanNulls": false,
             "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "line", "steps": [{ "color": "transparent", "value": null }, { "color": "green", "value": 10 }] }
+            "thresholdsStyle": { "mode": "line", "steps": [{ "color": "transparent", "value": null }, { "color": "green", "value": 7 }] }
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "transparent", "value": null },
-              { "color": "green", "value": 10 }
+              { "color": "green", "value": 7 }
             ]
           }
         },
