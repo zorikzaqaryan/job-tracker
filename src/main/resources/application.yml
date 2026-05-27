@@ -1,0 +1,136 @@
+spring:
+  application:
+    name: job-hunter
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/jobhunter
+    username: jobhunter
+    password: jobhunter
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: JobHunterPool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        default_schema: public
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: jobhunter
+    password: jobhunter
+    virtual-host: /
+    listener:
+      simple:
+        retry:
+          enabled: true
+          initial-interval: 3000
+          max-attempts: 3
+          multiplier: 2.0
+          max-interval: 30000
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: non_null
+
+  ai:
+    model:
+      chat: google-genai
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:}
+        chat:
+          options:
+            model: ${GEMINI_MODEL:gemini-2.0-flash}
+            temperature: ${GEMINI_TEMPERATURE:0.1}
+            response-mime-type: application/json
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: job-hunter
+    distribution:
+      percentiles-histogram:
+        jobhunter.matching.score: true
+      percentiles:
+        jobhunter.matching.score: 0.5,0.75,0.95,0.99
+      slo:
+        jobhunter.matching.score: 5,10,15,20,30,50
+    export:
+      prometheus:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+  show-actuator: false
+
+app:
+  matching:
+    threshold: 10
+
+  ai:
+    enabled: ${APP_AI_ENABLED:true}
+    provider: ${APP_AI_PROVIDER:mock}
+    min-rule-score-before-ai: ${APP_AI_MIN_RULE_SCORE:7}
+    min-qualification-score: ${APP_AI_MIN_QUALIFICATION_SCORE:80}
+    max-description-chars: ${APP_AI_MAX_DESCRIPTION_CHARS:12000}
+    require-url-enrichment: ${APP_AI_REQUIRE_URL_ENRICHMENT:false}
+    require-human-approval: ${APP_AI_REQUIRE_HUMAN_APPROVAL:true}
+    store-raw-prompts: ${APP_AI_STORE_RAW_PROMPTS:true}
+    send-cv-to-ai: ${APP_AI_SEND_CV_TO_AI:false}
+    retry:
+      max-attempts: ${APP_AI_RETRY_MAX_ATTEMPTS:3}
+      initial-delay-seconds: ${APP_AI_RETRY_INITIAL_DELAY_SECONDS:60}
+      multiplier: ${APP_AI_RETRY_MULTIPLIER:3.0}
+
+  url-enrichment:
+    enabled: ${APP_URL_ENRICHMENT_ENABLED:true}
+    max-nested-links: ${APP_URL_MAX_NESTED_LINKS:0}
+    timeout-seconds: ${APP_URL_ENRICHMENT_TIMEOUT_SECONDS:15}
+    max-page-chars: ${APP_URL_MAX_PAGE_CHARS:20000}
+    allowed-domains-only: ${APP_URL_ALLOWED_DOMAINS_ONLY:false}
+
+  telegram:
+    bot:
+      token: ${TELEGRAM_BOT_TOKEN:}
+      output-channel-id: ${TELEGRAM_OUTPUT_CHANNEL_ID:}
+      api-base-url: https://api.telegram.org
+    user:
+      api-id: ${TELEGRAM_API_ID:0}
+      api-hash: ${TELEGRAM_API_HASH:}
+      phone-number: ${TELEGRAM_PHONE_NUMBER:}
+      database-directory: ./tdlib-db
+      files-directory: ./tdlib-files
+      enabled: false   # set true when TDLib native library is installed

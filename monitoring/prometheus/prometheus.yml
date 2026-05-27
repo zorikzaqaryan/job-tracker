@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: job-hunter
+
+scrape_configs:
+  # Spring Boot app running on the host machine (outside Docker).
+  # host.docker.internal resolves to the host on Docker Desktop for Windows/macOS.
+  - job_name: job-hunter
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - host.docker.internal:8080
+    relabel_configs:
+      - target_label: application
+        replacement: job-hunter
