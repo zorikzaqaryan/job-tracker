@@ -36,6 +36,10 @@ public class JobSource {
     @Column(columnDefinition = "TEXT")
     private String url;
 
+    /** Link to open the channel in Telegram (invite, @username, or t.me/c/...). */
+    @Column(name = "telegram_channel_url", columnDefinition = "TEXT")
+    private String telegramChannelUrl;
+
     @Builder.Default
     @Column(nullable = false)
     private boolean enabled = true;

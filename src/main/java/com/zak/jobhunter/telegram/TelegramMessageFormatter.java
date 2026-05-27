@@ -60,6 +60,7 @@ public class TelegramMessageFormatter {
         if (job.getUrl() != null && !job.getUrl().isBlank()) {
             sb.append("<b>Link:</b> <a href=\"").append(job.getUrl()).append("\">Open</a>\n");
         }
+        appendTelegramMessageLink(sb, job);
 
         return sb.toString();
     }
@@ -107,9 +108,36 @@ public class TelegramMessageFormatter {
         if (job.getUrl() != null && !job.getUrl().isBlank()) {
             sb.append("<b>Link:</b> <a href=\"").append(job.getUrl()).append("\">Open</a>\n");
         }
+        appendTelegramMessageLink(sb, job);
 
         sb.append("\n<i>Review before applying.</i>");
         return sb.toString();
+    }
+
+    private void appendTelegramMessageLink(StringBuilder sb, JobPost job) {
+        String tgUrl = job.getTelegramMessageUrl();
+        if (tgUrl == null || tgUrl.isBlank()) {
+            tgUrl = resolveTelegramMessageUrl(job);
+        }
+        if (tgUrl != null && !tgUrl.isBlank()) {
+            sb.append("<b>Telegram:</b> <a href=\"").append(tgUrl).append("\">Go to message</a>\n");
+        }
+    }
+
+    private static String resolveTelegramMessageUrl(JobPost job) {
+        if (job.getRawMessage() == null) {
+            return null;
+        }
+        var raw = job.getRawMessage();
+        String username = null;
+        String channelId = raw.getSourceChannelId();
+        if (raw.getSource() != null) {
+            username = raw.getSource().getTelegramUsername();
+            if (channelId == null || channelId.isBlank()) {
+                channelId = raw.getSource().getTelegramChannelId();
+            }
+        }
+        return TelegramLinkBuilder.buildMessageUrl(username, channelId, raw.getExternalMessageId());
     }
 
     /**

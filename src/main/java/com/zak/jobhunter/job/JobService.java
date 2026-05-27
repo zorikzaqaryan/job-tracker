@@ -10,7 +10,9 @@ import com.zak.jobhunter.ingestion.RawMessage;
 import com.zak.jobhunter.job.dto.JobResponse;
 import com.zak.jobhunter.job.dto.JobSearchResponse;
 import com.zak.jobhunter.metrics.JobHunterMetrics;
+import com.zak.jobhunter.channel.JobSource;
 import com.zak.jobhunter.telegram.TelegramBotSender;
+import com.zak.jobhunter.telegram.TelegramLinkBuilder;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -103,12 +105,15 @@ public class JobService {
 
         JobStatus status = matched ? JobStatus.MATCHED_BY_RULES : JobStatus.NOT_MATCHED;
 
+        String telegramMessageUrl = resolveTelegramMessageUrl(rawMessage);
+
         JobPost job = JobPost.builder()
                 .rawMessage(rawMessage)
                 .title(title)
                 .location(location)
                 .description(description)
                 .url(rawMessage.getUrl())
+                .telegramMessageUrl(telegramMessageUrl)
                 .score(result.score())
                 .status(status)
                 .contentHash(contentHash)
@@ -237,6 +242,22 @@ public class JobService {
                 page.getNumber(), page.getSize(), page.getTotalElements(), page.getTotalPages());
     }
 
+    private String resolveTelegramMessageUrl(RawMessage raw) {
+        if (raw == null) {
+            return null;
+        }
+        String username = null;
+        String channelId = raw.getSourceChannelId();
+        JobSource source = raw.getSource();
+        if (source != null) {
+            username = source.getTelegramUsername();
+            if (channelId == null || channelId.isBlank()) {
+                channelId = source.getTelegramChannelId();
+            }
+        }
+        return TelegramLinkBuilder.buildMessageUrl(username, channelId, raw.getExternalMessageId());
+    }
+
     private JobResponse toResponse(JobPost job) {
         List<JobRuleMatch> matches = jobRuleMatchRepository.findByJobId(job.getId());
         List<JobResponse.RuleMatchResponse> matchDtos = matches.stream()
@@ -244,11 +265,17 @@ public class JobService {
                         m.getRule() != null ? m.getRule().getId() : null,
                         m.getMatchedField(), m.getMatchedText(), m.getWeight()))
                 .toList();
+        String telegramMessageUrl = job.getTelegramMessageUrl();
+        if (telegramMessageUrl == null || telegramMessageUrl.isBlank()) {
+            telegramMessageUrl = resolveTelegramMessageUrl(job.getRawMessage());
+        }
+        String sourceChannelName = job.getRawMessage() != null ? job.getRawMessage().getSourceName() : null;
         return new JobResponse(
                 job.getId(),
                 job.getRawMessage() != null ? job.getRawMessage().getId() : null,
                 job.getTitle(), job.getCompany(), job.getLocation(), job.getDescription(),
-                job.getUrl(), job.getScore(), job.getStatus(), job.getContentHash(),
+                job.getUrl(), telegramMessageUrl, sourceChannelName,
+                job.getScore(), job.getStatus(), job.getContentHash(),
                 job.getSentAt(), job.getCreatedAt(), job.getUpdatedAt(), matchDtos);
     }
 }

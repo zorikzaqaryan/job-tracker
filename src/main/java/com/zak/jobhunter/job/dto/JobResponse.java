@@ -13,6 +13,9 @@ public record JobResponse(
         String location,
         String description,
         String url,
+        /** Deep link to the original Telegram post — "Go to TG message". */
+        String telegramMessageUrl,
+        String sourceChannelName,
         int score,
         JobStatus status,
         String contentHash,

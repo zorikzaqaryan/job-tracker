@@ -3,6 +3,7 @@ package com.zak.jobhunter.channel;
 import com.zak.jobhunter.channel.dto.ChannelResponse;
 import com.zak.jobhunter.channel.dto.CreateChannelRequest;
 import com.zak.jobhunter.channel.dto.UpdateChannelRequest;
+import com.zak.jobhunter.telegram.TelegramLinkBuilder;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -45,6 +46,7 @@ public class ChannelService {
                 .url(req.url())
                 .enabled(req.enabled() != null ? req.enabled() : true)
                 .build();
+        applyTelegramChannelUrl(source);
         return toResponse(repository.save(source));
     }
 
@@ -59,6 +61,7 @@ public class ChannelService {
         if (req.enabled() != null) {
             source.setEnabled(req.enabled());
         }
+        applyTelegramChannelUrl(source);
         return toResponse(repository.save(source));
     }
 
@@ -90,11 +93,23 @@ public class ChannelService {
                 .orElseThrow(() -> new EntityNotFoundException("Channel not found: " + id));
     }
 
+    private void applyTelegramChannelUrl(JobSource source) {
+        source.setTelegramChannelUrl(TelegramLinkBuilder.buildChannelUrl(
+                source.getTelegramUsername(),
+                source.getTelegramChannelId(),
+                source.getUrl()));
+    }
+
     private ChannelResponse toResponse(JobSource s) {
+        String channelUrl = s.getTelegramChannelUrl();
+        if (channelUrl == null || channelUrl.isBlank()) {
+            channelUrl = TelegramLinkBuilder.buildChannelUrl(
+                    s.getTelegramUsername(), s.getTelegramChannelId(), s.getUrl());
+        }
         return new ChannelResponse(
                 s.getId(), s.getSourceType(), s.getName(),
                 s.getTelegramUsername(), s.getTelegramChannelId(),
-                s.getUrl(), s.isEnabled(), s.getLastExternalMessageId(),
+                s.getUrl(), channelUrl, s.isEnabled(), s.getLastExternalMessageId(),
                 s.getCreatedAt(), s.getUpdatedAt());
     }
 }

@@ -42,6 +42,10 @@ public class JobPost {
     @Column(columnDefinition = "TEXT")
     private String url;
 
+    /** Deep link to the original Telegram post (t.me/.../messageId). */
+    @Column(name = "telegram_message_url", columnDefinition = "TEXT")
+    private String telegramMessageUrl;
+
     @Builder.Default
     @Column(nullable = false)
     private int score = 0;

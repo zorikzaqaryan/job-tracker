@@ -11,6 +11,8 @@ public record ChannelResponse(
         String telegramUsername,
         String telegramChannelId,
         String url,
+        /** Open channel in Telegram (invite link or @username). */
+        String telegramChannelUrl,
         boolean enabled,
         String lastExternalMessageId,
         Instant createdAt,
