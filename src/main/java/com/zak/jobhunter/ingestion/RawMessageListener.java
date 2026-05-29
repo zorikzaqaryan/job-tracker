@@ -1,6 +1,7 @@
 package com.zak.jobhunter.ingestion;
 
 import com.zak.jobhunter.common.HashUtils;
+import com.zak.jobhunter.common.MessageUrlExtractor;
 import com.zak.jobhunter.job.JobPost;
 import com.zak.jobhunter.job.JobService;
 import com.zak.jobhunter.messaging.RabbitQueues;
@@ -78,7 +79,9 @@ public class RawMessageListener {
                             ? message.getExternalMessageId()
                             : String.valueOf(System.currentTimeMillis()))
                     .rawText(message.getRawText())
-                    .url(message.getUrl())
+                    .url(message.getUrl() != null && !message.getUrl().isBlank()
+                            ? message.getUrl()
+                            : MessageUrlExtractor.extractApplyUrl(message.getRawText()))
                     .publishedAt(message.getPublishedAt())
                     .contentHash(contentHash)
                     .processed(false)

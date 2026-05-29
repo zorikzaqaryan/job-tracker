@@ -8,6 +8,9 @@ package com.zak.jobhunter.telegram;
  */
 public final class TelegramLinkBuilder {
 
+    /** TDLib encodes channel message ids as {@code publicId << 20}. */
+    private static final long TDLIB_MESSAGE_ID_SHIFT = 1L << 20;
+
     private TelegramLinkBuilder() {}
 
     /** Opens the channel (invite link, @username, or best effort from numeric id). */
@@ -27,7 +30,10 @@ public final class TelegramLinkBuilder {
         if (messageId == null || messageId.isBlank()) {
             return null;
         }
-        String msgId = messageId.trim();
+        String msgId = toPublicMessageId(messageId);
+        if (msgId == null) {
+            return null;
+        }
 
         String username = normalizePublicUsername(telegramUsername);
         if (username != null) {
@@ -39,6 +45,25 @@ public final class TelegramLinkBuilder {
             return "https://t.me/c/" + privatePath + "/" + msgId;
         }
         return null;
+    }
+
+    /**
+     * Converts TDLib {@code message.id} to the id used in {@code t.me/...} links.
+     * Small ids are returned unchanged (manual ingest / public channels).
+     */
+    public static String toPublicMessageId(String messageId) {
+        if (messageId == null || messageId.isBlank()) {
+            return null;
+        }
+        try {
+            long id = Long.parseLong(messageId.trim());
+            if (id >= TDLIB_MESSAGE_ID_SHIFT) {
+                return String.valueOf(id >> 20);
+            }
+            return String.valueOf(id);
+        } catch (NumberFormatException ex) {
+            return messageId.trim();
+        }
     }
 
     /**

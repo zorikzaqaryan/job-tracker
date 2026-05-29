@@ -1,6 +1,7 @@
 package com.zak.jobhunter.telegram;
 
 import com.zak.jobhunter.ai.dto.JobAiAnalysisResult;
+import com.zak.jobhunter.common.MessageUrlExtractor;
 import com.zak.jobhunter.job.JobPost;
 import com.zak.jobhunter.job.JobRuleMatch;
 import org.springframework.stereotype.Component;
@@ -57,9 +58,7 @@ public class TelegramMessageFormatter {
         if (job.getRawMessage() != null && job.getRawMessage().getSourceName() != null) {
             sb.append("\n<b>Source:</b> ").append(escape(job.getRawMessage().getSourceName())).append("\n");
         }
-        if (job.getUrl() != null && !job.getUrl().isBlank()) {
-            sb.append("<b>Link:</b> <a href=\"").append(job.getUrl()).append("\">Open</a>\n");
-        }
+        appendApplyLink(sb, job);
         appendTelegramMessageLink(sb, job);
 
         return sb.toString();
@@ -114,13 +113,27 @@ public class TelegramMessageFormatter {
         return sb.toString();
     }
 
-    private void appendTelegramMessageLink(StringBuilder sb, JobPost job) {
-        String tgUrl = job.getTelegramMessageUrl();
-        if (tgUrl == null || tgUrl.isBlank()) {
-            tgUrl = resolveTelegramMessageUrl(job);
+    private void appendApplyLink(StringBuilder sb, JobPost job) {
+        String applyUrl = resolveApplyUrl(job);
+        if (applyUrl != null && !applyUrl.isBlank()) {
+            sb.append("\n✅ <b>Apply</b> → <a href=\"").append(applyUrl).append("\">").append(escape(applyUrl)).append("</a>\n");
         }
+    }
+
+    private static String resolveApplyUrl(JobPost job) {
+        if (job.getUrl() != null && !job.getUrl().isBlank()) {
+            return job.getUrl();
+        }
+        if (job.getRawMessage() != null) {
+            return MessageUrlExtractor.extractApplyUrl(job.getRawMessage().getRawText());
+        }
+        return null;
+    }
+
+    private void appendTelegramMessageLink(StringBuilder sb, JobPost job) {
+        String tgUrl = resolveTelegramMessageUrl(job);
         if (tgUrl != null && !tgUrl.isBlank()) {
-            sb.append("<b>Telegram:</b> <a href=\"").append(tgUrl).append("\">Go to message</a>\n");
+            sb.append("<b>Source post:</b> <a href=\"").append(tgUrl).append("\">Go to message</a>\n");
         }
     }
 

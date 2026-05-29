@@ -19,6 +19,18 @@ class TelegramLinkBuilderTest {
     }
 
     @Test
+    void buildMessageUrl_convertsTdLibMessageId() {
+        assertThat(TelegramLinkBuilder.buildMessageUrl(null, "2036676380", "78581334016"))
+                .isEqualTo("https://t.me/c/2036676380/74941");
+    }
+
+    @Test
+    void toPublicMessageId_shiftsLargeTdLibIds() {
+        assertThat(TelegramLinkBuilder.toPublicMessageId("78581334016")).isEqualTo("74941");
+        assertThat(TelegramLinkBuilder.toPublicMessageId("42")).isEqualTo("42");
+    }
+
+    @Test
     void buildChannelUrl_prefersExistingInviteLink() {
         assertThat(TelegramLinkBuilder.buildChannelUrl(null, null, "https://t.me/+inviteHash"))
                 .isEqualTo("https://t.me/+inviteHash");

@@ -2,6 +2,7 @@ package com.zak.jobhunter.telegram;
 
 import com.zak.jobhunter.channel.ChannelService;
 import com.zak.jobhunter.channel.SourceType;
+import com.zak.jobhunter.common.MessageUrlExtractor;
 import com.zak.jobhunter.channel.dto.ChannelResponse;
 import com.zak.jobhunter.messaging.RabbitQueues;
 import com.zak.jobhunter.messaging.RawJobMessage;
@@ -240,6 +241,8 @@ public class TdLibTelegramClient implements TelegramUserCollector {
                 ? source.telegramChannelId()
                 : String.valueOf(chatId);
 
+        String applyUrl = MessageUrlExtractor.extractApplyUrl(text);
+
         RawJobMessage queueMessage = RawJobMessage.builder()
                 .sourceType(SourceType.TELEGRAM.name())
                 .sourceName(source.name())
@@ -247,6 +250,7 @@ public class TdLibTelegramClient implements TelegramUserCollector {
                 .sourceId(source.id())
                 .externalMessageId(String.valueOf(message.id))
                 .rawText(text)
+                .url(applyUrl)
                 .publishedAt(Instant.ofEpochSecond(message.date))
                 .build();
 

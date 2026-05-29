@@ -3,6 +3,7 @@ package com.zak.jobhunter.job;
 import com.zak.jobhunter.ai.AiAnalysisService;
 import com.zak.jobhunter.ai.AiProperties;
 import com.zak.jobhunter.common.HashUtils;
+import com.zak.jobhunter.common.MessageUrlExtractor;
 import com.zak.jobhunter.filter.FilterRuleRepository;
 import com.zak.jobhunter.filter.MatchingService;
 import com.zak.jobhunter.filter.dto.MatchedRuleDto;
@@ -73,8 +74,9 @@ public class JobService {
      */
     @Transactional
     public JobPost processRawMessage(RawMessage rawMessage) {
+        String applyUrl = resolveApplyUrl(rawMessage);
         String contentHash = HashUtils.jobContentHash(
-                null, null, null, rawMessage.getUrl(), rawMessage.getRawText());
+                null, null, null, applyUrl, rawMessage.getRawText());
 
         if (jobPostRepository.existsByContentHash(contentHash)) {
             log.info("[JOB] ♻ Duplicate job content — skipping  rawId={} hash={}",
@@ -112,7 +114,7 @@ public class JobService {
                 .title(title)
                 .location(location)
                 .description(description)
-                .url(rawMessage.getUrl())
+                .url(applyUrl)
                 .telegramMessageUrl(telegramMessageUrl)
                 .score(result.score())
                 .status(status)
@@ -242,6 +244,13 @@ public class JobService {
                 page.getNumber(), page.getSize(), page.getTotalElements(), page.getTotalPages());
     }
 
+    private String resolveApplyUrl(RawMessage raw) {
+        if (raw.getUrl() != null && !raw.getUrl().isBlank()) {
+            return raw.getUrl();
+        }
+        return MessageUrlExtractor.extractApplyUrl(raw.getRawText());
+    }
+
     private String resolveTelegramMessageUrl(RawMessage raw) {
         if (raw == null) {
             return null;
@@ -265,10 +274,7 @@ public class JobService {
                         m.getRule() != null ? m.getRule().getId() : null,
                         m.getMatchedField(), m.getMatchedText(), m.getWeight()))
                 .toList();
-        String telegramMessageUrl = job.getTelegramMessageUrl();
-        if (telegramMessageUrl == null || telegramMessageUrl.isBlank()) {
-            telegramMessageUrl = resolveTelegramMessageUrl(job.getRawMessage());
-        }
+        String telegramMessageUrl = resolveTelegramMessageUrl(job.getRawMessage());
         String sourceChannelName = job.getRawMessage() != null ? job.getRawMessage().getSourceName() : null;
         return new JobResponse(
                 job.getId(),
